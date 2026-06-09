@@ -1,145 +1,206 @@
-# Multi-Commit — Project Structure
+# Multi-Commit
+
+> A GTK-powered Git GUI for Linux — commit and push to multiple remotes at once, with branch management, stash tools, favourites and more.
+
+![Platform](https://img.shields.io/badge/platform-Linux-blue)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![GTK](https://img.shields.io/badge/GTK-3.0-orange)
+![License](https://img.shields.io/badge/license-MIT-green)
+![Status](https://img.shields.io/badge/status-active-brightgreen)
+
+---
+
+## What is Multi-Commit?
+
+Multi-Commit is a lightweight GTK3 desktop app for Linux that makes git workflows faster and easier. Built specifically for developers who push to **multiple remotes** (e.g. personal GitHub + university GitHub), it wraps the full git workflow into a clean, keyboard-friendly UI.
+
+Built on **Linux Mint Cinnamon** — works on any GTK3-compatible distro.
+
+---
+
+## Features
+
+### Core Workflow
+- **Step-by-step commit flow** — `git add` → `git commit` → `git push`, each with Enter key support
+- **⚡ Quick Commit** (`Ctrl+Enter`) — stages, commits and pushes all remotes in one keystroke
+- **Push All Remotes** — one click to push to every configured remote simultaneously
+- **🔐 Push with Auth** — opens a terminal for password-protected remotes (e.g. university GitHub) safely
+
+### Project Management
+- **Recent projects list** — most recently used at the top, persisted across sessions
+- **Per-project actions** — open in 📁 file manager, 💻 VSCode, or 🖥 terminal from the sidebar
+- **🟢🟡🔴 Git status indicators** — see clean/unstaged/conflict state at a glance
+- **Branch + remote badges** on each project row
+
+### Git Tools (built-in)
+- **🔍 Diff viewer** — colour-coded `git diff HEAD` with green additions and red removals
+- **📜 Commit history** — collapsible log of last 8 commits
+- **⎇ Branch manager** — create, switch and delete branches without leaving the app
+- **📦 Stash manager** — save, apply, pop and drop stashes with optional descriptions
+- **Custom command runner** — run any git command and see output inline
+
+### Favourites
+- **⭐ Favourite Commands** — save any shell command (not just git!) with a name and category
+- **Quick-run from menubar** — run any favourite directly from the menu without opening the manager
+- **Terminal mode** — favourites that need a password or interactive input open in your terminal automatically
+- **Category filtering** — organise favourites by category (Git, System, Dev, etc.)
+
+### Settings
+- Auto `git add` on project select
+- Auto `git push` after commit
+- Configurable VSCode command, terminal emulator, default remote
+- **Remotes / Accounts tab** — add/update git remotes per project, enable credential caching with custom timeout
+
+---
+
+## Screenshots
+
+> _Coming soon — contributions welcome!_
+
+---
+
+## Installation
+
+### Requirements
+
+- Linux (GTK3-compatible distro)
+- Python 3.10+
+- git
+
+### Quick Install
+
+```bash
+git clone https://github.com/Pixsl-Labs/Multi-Commit.git
+cd Multi-Commit
+chmod +x install.sh
+./install.sh
+```
+
+The installer will:
+- Install Python GTK3 dependencies via apt
+- Create a `.desktop` file for your app menu and panel
+- Register the app with your desktop environment
+
+### Launch
+
+```bash
+# Terminal
+python3 ~/Projects/Multi-Commit/main.py
+
+# Or via Ulauncher (Ctrl+Space) → type "Multi-Commit"
+
+# Or from your app menu / taskbar after install
+```
+
+---
+
+## Adding to the Cinnamon Panel
+
+See [PANEL_SETUP.md](PANEL_SETUP.md) for step-by-step instructions.
+
+**Quickest method:**
+1. Click the Menu button → find Multi-Commit
+2. Right-click → Add to panel
+
+---
+
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+Enter` | Quick Commit (add → commit → push all) |
+| `Enter` | Confirm current step |
+| `Ctrl+Q` | Quit |
+
+---
+
+## Project Structure
 
 ```
-~/Projects/multi-commit/
+Multi-Commit/
 ├── main.py                  # Entry point
-├── install.sh               # Installer (desktop shortcut, dependencies)
-├── uninstall.sh
-├── requirements.txt
-├── README.md
+├── install.sh               # Installer
+├── PANEL_SETUP.md           # Panel/taskbar setup guide
 │
 ├── core/
-│   ├── __init__.py
-│   ├── git_ops.py           # All git commands (add, commit, push, custom)
-│   ├── project_manager.py   # Recent projects list, persistence
-│   └── settings.py          # Load/save user settings (JSON)
+│   ├── git_ops.py           # All git subprocess calls
+│   ├── project_manager.py   # Recent projects persistence
+│   ├── settings.py          # User settings (JSON)
+│   └── favourites.py        # Favourite commands persistence
 │
 ├── ui/
-│   ├── __init__.py
-│   ├── main_window.py       # Main GTK window
-│   ├── project_list.py      # Left panel — project list + open buttons
-│   ├── commit_panel.py      # Right panel — git add, commit, push flow
-│   ├── settings_dialog.py   # Settings popup
-│   └── dialogs.py           # Reusable input dialogs
+│   ├── main_window.py       # Main GTK window + menubar
+│   ├── project_list.py      # Left panel — project list
+│   ├── commit_panel.py      # Right panel — commit flow
+│   ├── branch_panel.py      # Branch manager widget
+│   ├── stash_panel.py       # Stash manager widget
+│   ├── favourites_dialog.py # Favourites manager
+│   └── settings_dialog.py   # Settings + remotes dialog
 │
-├── assets/
-│   └── icon.png             # App icon (for panel shortcut)
-│
-└── multi-commit.desktop     # Desktop/panel launcher file
+└── assets/
+    └── icon.png             # App icon (git logo)
 ```
 
-## Module Responsibilities
+---
 
-### core/git_ops.py
-- `git_add(path, target=".")` 
-- `git_commit(path, message)`
-- `git_push(path)`
-- `run_custom(path, command)`
-- `get_remotes(path)` — detects available remotes
+## Configuration
 
-### core/project_manager.py
-- Stores recently opened project paths
-- Persists to `~/.config/multi-commit/recent.json`
-- Max 20 recent projects, most recent at top
+Settings are stored in `~/.config/multi-commit/`:
 
-### core/settings.py
-- `auto_git_add` — bool
-- `auto_git_push` — bool  
-- `default_add_target` — string (default ".")
-- `vscode_cmd` — string (default "code")
-- Persists to `~/.config/multi-commit/settings.json`
-
-### ui/main_window.py
-- Two-panel layout (project list left, commit panel right)
-- Menubar with Settings
-
-### ui/project_list.py
-- "Open Folder" file dialog button
-- Project list (most recent top)
-- Per-project buttons: 📁 Folder | 💻 VSCode | 🖥️ Terminal
-- Click project to select it for committing
-
-### ui/commit_panel.py
-- git add input (default ".") — Enter to confirm
-- Commit message input — Enter to confirm  
-- Push step — Enter to confirm
-- Custom command input at any step
-- Auto-mode toggle respects settings
-
-# Adding Multi-Commit to the Cinnamon Panel
-
-## Method 1 — Easiest: Drag from Menu (recommended)
-
-1. Click the **Menu** button (bottom-left of taskbar)
-2. Find **Multi-Commit** under Programming or search for it
-3. **Right-click** it → **Add to panel**
-
-Done! It'll appear as the git icon in your panel.
+| File | Contents |
+|------|----------|
+| `settings.json` | App preferences |
+| `recent.json` | Recent project paths |
+| `favourites.json` | Saved favourite commands |
 
 ---
 
-## Method 2 — Panel Launcher Applet
+## Use Case: Multiple GitHub Accounts
 
-1. **Right-click** the Cinnamon panel → **Add applets to the panel**
-2. Search for **"Panel Launcher"** → click **Add to panel**
-3. The launcher applet appears in your panel
-4. **Right-click** the applet → **Configure...**
-5. Click **Add** → navigate to:
-   ```
-   /home/sam/.local/share/applications/multi-commit.desktop
-   ```
-6. Click **OK**
-
----
-
-## Method 3 — Manual via terminal
+Multi-Commit was built to solve the problem of pushing to both a **personal GitHub** and a **university/work GitHub** from the same repo:
 
 ```bash
-# Copy .desktop to panel launchers folder
-cp ~/Projects/multi-commit/multi-commit.desktop \
-   ~/.local/share/cinnamon/panel-launchers/
+# Add your remotes (or use the Remotes tab in Settings)
+git remote add origin  https://github.com/personal-user/repo.git
+git remote add uni     https://github.com/uni-user/repo.git
 
-# Then right-click panel → Add applets → Panel Launcher → configure
+# Then "Push All Remotes" sends to both at once
+# "Push with Auth" handles password-protected remotes safely
 ```
 
 ---
 
-## Pinning to taskbar (like Windows-style)
+## Roadmap
 
-1. Launch Multi-Commit once: `python3 ~/Projects/multi-commit/main.py`
-2. It appears in the taskbar while running
-3. **Right-click** the taskbar icon → **Add to panel** or **Pin**
-
----
-
-## Keyboard launcher (Ulauncher)
-
-Already works after install! Press `Ctrl+Space` and type `Multi` — it'll appear instantly.
+- [ ] System tray / notification on push success
+- [ ] Cinnamon applet wrapper
+- [ ] `git pull` / fetch panel
+- [ ] Dark/light theme toggle
+- [ ] Tag manager
+- [ ] GPG commit signing support
 
 ---
 
-## Making it launchable from anywhere (optional)
+## Contributing
+
+Pull requests welcome! Please open an issue first for major changes.
 
 ```bash
-# Add a global alias
-echo "alias multi-commit='python3 ~/Projects/multi-commit/main.py'" >> ~/.bashrc
-source ~/.bashrc
-
-# Now just type:
-multi-commit
+git clone https://github.com/Pixsl-Labs/Multi-Commit.git
+cd Multi-Commit
+python3 main.py  # run from source, no build step needed
 ```
 
 ---
 
-## Setting the correct icon
+## License
 
-Make sure your icon is at:
-```
-~/Projects/multi-commit/assets/icon.png
-```
+MIT — see [LICENSE](LICENSE) for details.
 
-If the panel shows a blank/gear icon, run:
-```bash
-update-desktop-database ~/.local/share/applications/
-```
-Then log out and back in.
+---
+
+## Credits
+
+- Git icon by [pocike on Flaticon](https://www.flaticon.com/free-icons/git)
+- Built with Python + GTK3 on Linux Mint Cinnamon
+- Made by [Pixsl-Labs](https://github.com/Pixsl-Labs)
