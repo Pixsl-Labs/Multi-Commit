@@ -294,10 +294,4 @@ class AppearanceDialog(Gtk.Window):
 
     def _save(self, _):
         settings.set_value("theme", self.current_theme)
-        dlg = Gtk.MessageDialog(
-            transient_for=self, flags=0,
-            message_type=Gtk.MessageType.INFO,
-            buttons=Gtk.ButtonsType.OK, text="Theme saved!"
-        )
-        dlg.run()
-        dlg.destroy()
+        self.destroy()
