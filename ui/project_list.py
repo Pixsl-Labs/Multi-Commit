@@ -22,9 +22,10 @@ def _get_status_icon(path):
     return STATUS_UNSTAGED
 
 class ProjectListPanel(Gtk.Box):
-    def __init__(self, on_select):
+    def __init__(self, on_select, on_code_review=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.on_select = on_select
+        self.on_code_review = on_code_review
         self.selected_path = None
         self._apply_css()
         self._build()
@@ -159,6 +160,7 @@ class ProjectListPanel(Gtk.Box):
             ("📁 Folder",   "Open in file manager", lambda _, p=path: self._open_folder(p)),
             ("💻 VSCode",   "Open in VSCode",        lambda _, p=path: self._open_vscode(p)),
             ("🖥 Terminal", "Open terminal here",    lambda _, p=path: self._open_terminal(p)),
+            ("📋 Review",   "Generate code review",  lambda _, p=path: self._code_review(p)),
         ]:
             btn = Gtk.Button(label=label)
             btn.set_tooltip_text(tip)
@@ -187,7 +189,7 @@ class ProjectListPanel(Gtk.Box):
             title="Select Project Folder",
             action=Gtk.FileChooserAction.SELECT_FOLDER,
             buttons=(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
-                    Gtk.STOCK_OPEN, Gtk.ResponseType.OK)
+                     Gtk.STOCK_OPEN, Gtk.ResponseType.OK)
         )
         dlg.set_current_folder(os.path.expanduser("~/Projects"))
         if dlg.run() == Gtk.ResponseType.OK:
@@ -212,6 +214,10 @@ class ProjectListPanel(Gtk.Box):
                 return
             except FileNotFoundError:
                 continue
+
+    def _code_review(self, path):
+        if self.on_code_review:
+            self.on_code_review(path)
 
     def _remove(self, path):
         project_manager.remove_recent(path)
