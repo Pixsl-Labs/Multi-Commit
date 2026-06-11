@@ -1,4 +1,4 @@
-"""Right panel — git add → commit → push flow + branch/stash/diff tools."""
+"""Right panel — full git workflow + branch/stash/pull/diff/notes tools."""
 import os
 import subprocess
 from datetime import datetime
@@ -6,13 +6,30 @@ import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, Gdk, Pango
 from core import git_ops, settings, project_manager
+from core import notify
+from core.notes import get as get_note, save_note
 from ui.branch_panel import BranchPanel
 from ui.stash_panel import StashPanel
+from ui.pull_panel import PullPanel
+
+COMMIT_TEMPLATES = [
+    ("feat",     "feat: "),
+    ("fix",      "fix: "),
+    ("docs",     "docs: "),
+    ("style",    "style: "),
+    ("refactor", "refactor: "),
+    ("test",     "test: "),
+    ("chore",    "chore: "),
+    ("perf",     "perf: "),
+    ("ci",       "ci: "),
+    ("revert",   "revert: "),
+]
 
 class CommitPanel(Gtk.Box):
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.project_path = None
+        self._note_save_timeout = None
         self._apply_css()
         self._build()
 
@@ -20,36 +37,33 @@ class CommitPanel(Gtk.Box):
         css = b"""
         .commit-header { padding: 12px 16px 8px 16px; border-bottom: 1px solid alpha(white,0.08); }
         .step-card {
-            background: alpha(white, 0.04);
-            border-radius: 6px;
-            border: 1px solid alpha(white, 0.08);
-            padding: 10px;
-            margin: 4px 0;
+            background: alpha(white, 0.04); border-radius: 6px;
+            border: 1px solid alpha(white, 0.08); padding: 10px; margin: 4px 0;
         }
         .tool-card {
-            background: alpha(white, 0.03);
-            border-radius: 6px;
-            border: 1px solid alpha(white, 0.06);
-            margin: 4px 0;
+            background: alpha(white, 0.03); border-radius: 6px;
+            border: 1px solid alpha(white, 0.06); margin: 4px 0;
+        }
+        .notes-view {
+            font-family: sans-serif; font-size: 12px;
+            background: alpha(#f39c12, 0.06);
         }
         .step-title { font-size: 12px; font-weight: bold; opacity: 0.7; }
-        .tool-title { font-size: 12px; font-weight: bold; opacity: 0.6; padding: 8px 10px 4px 10px; }
         .result-ok   { color: #2ecc71; font-size: 11px; }
         .result-fail { color: #e74c3c; font-size: 11px; }
         .history-view { font-size: 11px; font-family: monospace; opacity: 0.8; }
-        .diff-view    { font-size: 11px; font-family: monospace; }
         .output-view  { font-size: 11px; font-family: monospace; }
         .shortcut-hint { font-size: 10px; opacity: 0.45; }
         .quick-commit-btn {
             background: linear-gradient(135deg, #c0392b, #922b21);
             color: white; font-weight: bold;
-            border-radius: 6px; padding: 6px 16px;
-            border: none;
+            border-radius: 6px; padding: 6px 16px; border: none;
         }
         .remote-auth-btn { color: #3498db; }
-        .diff-add { color: #2ecc71; }
-        .diff-remove { color: #e74c3c; }
-        .timestamp { font-size: 10px; opacity: 0.4; font-family: monospace; }
+        .template-btn {
+            font-size: 10px; padding: 2px 6px;
+            border-radius: 3px; border: 1px solid alpha(white,0.15);
+        }
         """
         provider = Gtk.CssProvider()
         provider.load_from_data(css)
@@ -71,7 +85,7 @@ class CommitPanel(Gtk.Box):
 
         self.quick_btn = Gtk.Button(label="⚡ Quick Commit  Ctrl+Enter")
         self.quick_btn.get_style_context().add_class("quick-commit-btn")
-        self.quick_btn.set_tooltip_text("git add . → commit → push all (Ctrl+Enter)")
+        self.quick_btn.set_tooltip_text("git add . → commit → push all")
         self.quick_btn.connect("clicked", self._do_quick_commit)
         self.quick_btn.set_sensitive(False)
         title_row.pack_end(self.quick_btn, False, False, 0)
@@ -83,57 +97,52 @@ class CommitPanel(Gtk.Box):
         self.status_label.get_style_context().add_class("dim-label")
         meta_row.pack_start(self.status_label, True, True, 0)
 
-        self.history_toggle = Gtk.ToggleButton(label="📜 History")
-        self.history_toggle.set_relief(Gtk.ReliefStyle.NONE)
-        self.history_toggle.connect("toggled", self._toggle_history)
-        meta_row.pack_end(self.history_toggle, False, False, 0)
+        for label, attr, cb in [
+            ("📜 History", "history_toggle", self._toggle_history),
+            ("🔍 Diff",    "diff_toggle",    self._toggle_diff),
+        ]:
+            btn = Gtk.ToggleButton(label=label)
+            btn.set_relief(Gtk.ReliefStyle.NONE)
+            btn.connect("toggled", cb)
+            setattr(self, attr, btn)
+            meta_row.pack_end(btn, False, False, 0)
 
-        self.diff_toggle = Gtk.ToggleButton(label="🔍 Diff")
-        self.diff_toggle.set_relief(Gtk.ReliefStyle.NONE)
-        self.diff_toggle.connect("toggled", self._toggle_diff)
-        meta_row.pack_end(self.diff_toggle, False, False, 0)
         hdr.pack_start(meta_row, False, False, 0)
         self.pack_start(hdr, False, False, 0)
 
         # ── HISTORY REVEALER ──
-        self.history_revealer = Gtk.Revealer()
-        self.history_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
-        hs = Gtk.ScrolledWindow()
-        hs.set_min_content_height(90)
-        hs.set_max_content_height(90)
+        self.history_revealer = self._make_revealer(90)
         self.history_view = Gtk.TextView()
         self.history_view.set_editable(False)
         self.history_view.set_wrap_mode(Gtk.WrapMode.NONE)
         self.history_view.get_style_context().add_class("history-view")
         self.history_buf = self.history_view.get_buffer()
+        hs = Gtk.ScrolledWindow()
+        hs.set_min_content_height(90)
         hs.add(self.history_view)
         self.history_revealer.add(hs)
         self.pack_start(self.history_revealer, False, False, 0)
 
         # ── DIFF REVEALER ──
-        self.diff_revealer = Gtk.Revealer()
-        self.diff_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
+        self.diff_revealer = self._make_revealer(150)
         diff_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         diff_hdr = Gtk.Box(spacing=6)
         diff_hdr.set_border_width(6)
-        diff_title = Gtk.Label()
-        diff_title.set_markup("<b>Staged + Unstaged Changes</b>")
-        diff_title.set_halign(Gtk.Align.START)
-        diff_hdr.pack_start(diff_title, True, True, 0)
-        refresh_diff_btn = Gtk.Button(label="↻")
-        refresh_diff_btn.set_relief(Gtk.ReliefStyle.NONE)
-        refresh_diff_btn.connect("clicked", lambda _: self._load_diff())
-        diff_hdr.pack_end(refresh_diff_btn, False, False, 0)
+        diff_lbl = Gtk.Label()
+        diff_lbl.set_markup("<b>Staged + Unstaged Changes</b>")
+        diff_lbl.set_halign(Gtk.Align.START)
+        diff_hdr.pack_start(diff_lbl, True, True, 0)
+        rdiff = Gtk.Button(label="↻")
+        rdiff.set_relief(Gtk.ReliefStyle.NONE)
+        rdiff.connect("clicked", lambda _: self._load_diff())
+        diff_hdr.pack_end(rdiff, False, False, 0)
         diff_box.pack_start(diff_hdr, False, False, 0)
         ds = Gtk.ScrolledWindow()
         ds.set_min_content_height(150)
-        ds.set_max_content_height(150)
         self.diff_view = Gtk.TextView()
         self.diff_view.set_editable(False)
-        self.diff_view.set_wrap_mode(Gtk.WrapMode.NONE)
         self.diff_view.set_monospace(True)
         self.diff_buf = self.diff_view.get_buffer()
-        # Tags for coloured diff lines
         self.diff_buf.create_tag("add",    foreground="#2ecc71")
         self.diff_buf.create_tag("remove", foreground="#e74c3c")
         self.diff_buf.create_tag("header", foreground="#3498db")
@@ -142,7 +151,7 @@ class CommitPanel(Gtk.Box):
         self.diff_revealer.add(diff_box)
         self.pack_start(self.diff_revealer, False, False, 0)
 
-        # ── SCROLLABLE MAIN CONTENT ──
+        # ── SCROLLABLE MAIN ──
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -153,7 +162,7 @@ class CommitPanel(Gtk.Box):
         auto_box.set_margin_bottom(4)
         self.auto_add_switch  = self._make_switch("Auto git add",  "auto_git_add",  auto_box)
         self.auto_push_switch = self._make_switch("Auto push",     "auto_git_push", auto_box)
-        hint = Gtk.Label(label="Ctrl+Enter = quick full commit")
+        hint = Gtk.Label(label="Ctrl+Enter = quick commit")
         hint.get_style_context().add_class("shortcut-hint")
         auto_box.pack_end(hint, False, False, 0)
         inner.pack_start(auto_box, False, False, 0)
@@ -163,19 +172,17 @@ class CommitPanel(Gtk.Box):
         inner.pack_start(self._step_card_push(),   False, False, 0)
         inner.pack_start(self._step_card_custom(), False, False, 0)
 
-        # ── BRANCH MANAGER (collapsible card) ──
-        inner.pack_start(self._tool_card(
-            "⎇ Branch Manager",
-            "branch_revealer",
-            self._build_branch_panel
-        ), False, False, 0)
-
-        # ── STASH MANAGER (collapsible card) ──
-        inner.pack_start(self._tool_card(
-            "📦 Stash Manager",
-            "stash_revealer",
-            self._build_stash_panel
-        ), False, False, 0)
+        # ── Collapsible tool cards ──
+        for title, rev_attr, builder in [
+            ("⬇ Pull / Fetch",   "pull_revealer",   self._build_pull_panel),
+            ("⎇ Branch Manager", "branch_revealer", self._build_branch_panel),
+            ("📦 Stash Manager", "stash_revealer",  self._build_stash_panel),
+            ("📝 Project Notes", "notes_revealer",  self._build_notes_panel),
+        ]:
+            inner.pack_start(
+                self._tool_card(title, rev_attr, builder),
+                False, False, 0
+            )
 
         # Output log
         out_lbl = Gtk.Label()
@@ -198,7 +205,12 @@ class CommitPanel(Gtk.Box):
         self.pack_start(scroll, True, True, 0)
         self.connect("key-press-event", self._on_key_press)
 
-    # ── Tool card builder ──
+    # ── Revealer / card helpers ──────────────────────────────────────────────
+
+    def _make_revealer(self, min_h=0):
+        r = Gtk.Revealer()
+        r.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
+        return r
 
     def _tool_card(self, title, revealer_attr, content_builder):
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -217,21 +229,23 @@ class CommitPanel(Gtk.Box):
         toggle.add(hdr)
         card.pack_start(toggle, False, False, 0)
 
-        revealer = Gtk.Revealer()
-        revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
-        setattr(self, revealer_attr, revealer)
+        rev = Gtk.Revealer()
+        rev.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
+        setattr(self, revealer_attr, rev)
+        rev.add(content_builder())
+        card.pack_start(rev, False, False, 0)
 
-        content = content_builder()
-        revealer.add(content)
-        card.pack_start(revealer, False, False, 0)
-
-        def on_toggle(btn):
-            active = btn.get_active()
-            revealer.set_reveal_child(active)
-            arrow.set_text("▾" if active else "▸")
-
-        toggle.connect("toggled", on_toggle)
+        toggle.connect("toggled", lambda b: (
+            rev.set_reveal_child(b.get_active()),
+            arrow.set_text("▾" if b.get_active() else "▸")
+        ))
         return card
+
+    # ── Panel builders ───────────────────────────────────────────────────────
+
+    def _build_pull_panel(self):
+        self.pull_panel = PullPanel(on_done=self._on_branch_change)
+        return self.pull_panel
 
     def _build_branch_panel(self):
         self.branch_panel = BranchPanel(on_branch_change=self._on_branch_change)
@@ -241,7 +255,27 @@ class CommitPanel(Gtk.Box):
         self.stash_panel_widget = StashPanel()
         return self.stash_panel_widget
 
-    # ── Step cards ──
+    def _build_notes_panel(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        box.set_border_width(8)
+
+        hint = Gtk.Label(label="Notes are saved automatically per project.")
+        hint.get_style_context().add_class("dim-label")
+        hint.set_halign(Gtk.Align.START)
+        box.pack_start(hint, False, False, 0)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_min_content_height(100)
+        self.notes_view = Gtk.TextView()
+        self.notes_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+        self.notes_view.get_style_context().add_class("notes-view")
+        self.notes_buf = self.notes_view.get_buffer()
+        self.notes_buf.connect("changed", self._on_notes_changed)
+        scroll.add(self.notes_view)
+        box.pack_start(scroll, True, True, 0)
+        return box
+
+    # ── Step cards ───────────────────────────────────────────────────────────
 
     def _step_card(self, title):
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -270,6 +304,24 @@ class CommitPanel(Gtk.Box):
 
     def _step_card_commit(self):
         card = self._step_card("STEP 2 — git commit")
+
+        # ── Commit template chips ──
+        tmpl_box = Gtk.Box(spacing=4)
+        tmpl_box.set_margin_bottom(4)
+        tmpl_lbl = Gtk.Label(label="Template:")
+        tmpl_lbl.get_style_context().add_class("dim-label")
+        tmpl_box.pack_start(tmpl_lbl, False, False, 0)
+
+        for name, prefix in COMMIT_TEMPLATES:
+            btn = Gtk.Button(label=name)
+            btn.set_relief(Gtk.ReliefStyle.NONE)
+            btn.get_style_context().add_class("template-btn")
+            btn.set_tooltip_text(f"Prepend '{prefix}'")
+            btn.connect("clicked", self._apply_template, prefix)
+            tmpl_box.pack_start(btn, False, False, 0)
+
+        card.pack_start(tmpl_box, False, False, 0)
+
         row = Gtk.Box(spacing=6)
         self.commit_entry = Gtk.Entry()
         self.commit_entry.set_placeholder_text("Commit message…")
@@ -297,7 +349,6 @@ class CommitPanel(Gtk.Box):
         push_all_btn.connect("clicked", self._do_push_all)
         row.pack_start(push_all_btn, False, False, 0)
         auth_btn = Gtk.Button(label="🔐 Push with Auth")
-        auth_btn.set_tooltip_text("Opens terminal for password entry")
         auth_btn.get_style_context().add_class("remote-auth-btn")
         auth_btn.connect("clicked", self._do_push_auth_terminal)
         row.pack_end(auth_btn, False, False, 0)
@@ -310,7 +361,7 @@ class CommitPanel(Gtk.Box):
         card = self._step_card("CUSTOM COMMAND")
         row = Gtk.Box(spacing=6)
         self.custom_entry = Gtk.Entry()
-        self.custom_entry.set_placeholder_text("e.g. git stash, git rebase main, git log…")
+        self.custom_entry.set_placeholder_text("e.g. git stash, git rebase main…")
         self.custom_entry.connect("activate", self._do_custom)
         row.pack_start(self.custom_entry, True, True, 0)
         btn = Gtk.Button(label="Run")
@@ -321,7 +372,7 @@ class CommitPanel(Gtk.Box):
         card.pack_start(self.custom_result, False, False, 0)
         return card
 
-    # ── Helpers ──
+    # ── Helpers ──────────────────────────────────────────────────────────────
 
     def _result_lbl(self):
         lbl = Gtk.Label(label="")
@@ -360,13 +411,11 @@ class CommitPanel(Gtk.Box):
         self.history_buf.set_text(out if ok else "(no commits yet)")
 
     def _load_diff(self):
-        if not self.project_path:
-            return
+        if not self.project_path: return
         self.diff_buf.set_text("")
-        ok, stat = git_ops.run_custom(self.project_path, "git diff --stat HEAD")
-        ok2, diff = git_ops.run_custom(self.project_path, "git diff HEAD")
-        full = (stat or "") + "\n" + (diff or "")
-        for line in full.splitlines():
+        _, stat = git_ops.run_custom(self.project_path, "git diff --stat HEAD")
+        _, diff = git_ops.run_custom(self.project_path, "git diff HEAD")
+        for line in ((stat or "") + "\n" + (diff or "")).splitlines():
             end = self.diff_buf.get_end_iter()
             if line.startswith("+") and not line.startswith("+++"):
                 self.diff_buf.insert_with_tags_by_name(end, line + "\n", "add")
@@ -391,14 +440,38 @@ class CommitPanel(Gtk.Box):
             self._do_quick_commit(None)
 
     def _on_branch_change(self):
-        """Called when branch switches — refresh header."""
         if self.project_path:
             branch = git_ops.get_current_branch(self.project_path)
             status = git_ops.get_status(self.project_path)
             changed = len(status.splitlines()) if status else 0
             self.status_label.set_text(f"⎇  {branch}   |   {changed} changed file(s)")
 
-    # ── Public ──
+    def _apply_template(self, _, prefix):
+        current = self.commit_entry.get_text()
+        # If already has a prefix, replace it; otherwise prepend
+        if ": " in current:
+            _, rest = current.split(": ", 1)
+            self.commit_entry.set_text(prefix + rest)
+        else:
+            self.commit_entry.set_text(prefix + current)
+        self.commit_entry.grab_focus()
+        self.commit_entry.set_position(-1)
+
+    def _on_notes_changed(self, buf):
+        """Auto-save notes with a short debounce."""
+        if not self.project_path:
+            return
+        from gi.repository import GLib
+        if self._note_save_timeout:
+            GLib.source_remove(self._note_save_timeout)
+        def _save():
+            s, e = buf.get_bounds()
+            save_note(self.project_path, buf.get_text(s, e, False))
+            self._note_save_timeout = None
+            return False
+        self._note_save_timeout = GLib.timeout_add(800, _save)
+
+    # ── Public ───────────────────────────────────────────────────────────────
 
     def set_project(self, path):
         self.project_path = path
@@ -419,13 +492,20 @@ class CommitPanel(Gtk.Box):
         self._load_history(path)
         self.branch_panel.refresh(path)
         self.stash_panel_widget.refresh(path)
+        self.pull_panel.refresh(path)
         project_manager.add_recent(path)
         self._log(f"─── {os.path.basename(path)} ───")
+
+        # Load notes
+        note = get_note(path)
+        self.notes_buf.handler_block_by_func(self._on_notes_changed)
+        self.notes_buf.set_text(note)
+        self.notes_buf.handler_unblock_by_func(self._on_notes_changed)
 
         if settings.get("auto_git_add"):
             self._do_add(None)
 
-    # ── Actions ──
+    # ── Actions ──────────────────────────────────────────────────────────────
 
     def _do_add(self, _):
         if not self.project_path: return
@@ -446,6 +526,7 @@ class CommitPanel(Gtk.Box):
         if ok:
             self.commit_entry.set_text("")
             self._load_history(self.project_path)
+            notify.committed(msg, os.path.basename(self.project_path))
             if settings.get("auto_git_push"):
                 self._do_push(None)
 
@@ -455,14 +536,26 @@ class CommitPanel(Gtk.Box):
         ok, out = git_ops.git_push(self.project_path, remote)
         self._set_result(self.push_result, ok, out)
         self._log(f"git push {remote} → {'ok' if ok else out}")
+        proj = os.path.basename(self.project_path)
+        if ok:
+            notify.pushed(remote, proj)
+        else:
+            notify.push_failed(remote, proj, out)
 
     def _do_push_all(self, _):
         if not self.project_path: return
         remotes = git_ops.get_remotes(self.project_path)
+        all_ok = True
         for r in remotes:
             ok, out = git_ops.git_push(self.project_path, r)
             self._log(f"git push {r} → {'ok' if ok else out}")
-        self._set_result(self.push_result, True, f"Pushed to {len(remotes)} remote(s)")
+            if not ok:
+                all_ok = False
+                notify.push_failed(r, os.path.basename(self.project_path), out)
+            else:
+                notify.pushed(r, os.path.basename(self.project_path))
+        self._set_result(self.push_result, all_ok,
+                         f"Pushed to {len(remotes)} remote(s)" if all_ok else "Some pushes failed")
 
     def _do_push_auth_terminal(self, _):
         if not self.project_path: return
@@ -471,8 +564,11 @@ class CommitPanel(Gtk.Box):
         term = settings.get("terminal_cmd")
         for t in [term, "kitty", "x-terminal-emulator", "gnome-terminal", "xterm"]:
             try:
-                subprocess.Popen([t, "--", "bash", "-c", cmd])
-                self._log(f"🔐 Terminal opened for git push {remote}")
+                if t == "kitty":
+                    subprocess.Popen(["kitty", "--hold", "bash", "-c", cmd])
+                else:
+                    subprocess.Popen([t, "--", "bash", "-c", cmd])
+                self._log(f"🔐 Terminal for git push {remote}")
                 return
             except FileNotFoundError:
                 continue
