@@ -11,6 +11,7 @@ from core.notes import get as get_note, save_note
 from ui.branch_panel import BranchPanel
 from ui.stash_panel import StashPanel
 from ui.pull_panel import PullPanel
+from ui.tag_panel import TagPanel
 
 COMMIT_TEMPLATES = [
     ("feat",     "feat: "),
@@ -176,6 +177,7 @@ class CommitPanel(Gtk.Box):
         for title, rev_attr, builder in [
             ("⬇ Pull / Fetch",   "pull_revealer",   self._build_pull_panel),
             ("⎇ Branch Manager", "branch_revealer", self._build_branch_panel),
+            ("🏷 Tag Manager",   "tag_revealer",    self._build_tag_panel),
             ("📦 Stash Manager", "stash_revealer",  self._build_stash_panel),
             ("📝 Project Notes", "notes_revealer",  self._build_notes_panel),
         ]:
@@ -251,9 +253,9 @@ class CommitPanel(Gtk.Box):
         self.branch_panel = BranchPanel(on_branch_change=self._on_branch_change)
         return self.branch_panel
 
-    def _build_stash_panel(self):
-        self.stash_panel_widget = StashPanel()
-        return self.stash_panel_widget
+    def _build_tag_panel(self):
+        self.tag_panel_widget = TagPanel()
+        return self.tag_panel_widget
 
     def _build_notes_panel(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -493,6 +495,7 @@ class CommitPanel(Gtk.Box):
         self.branch_panel.refresh(path)
         self.stash_panel_widget.refresh(path)
         self.pull_panel.refresh(path)
+        self.tag_panel_widget.refresh(path)
         project_manager.add_recent(path)
         self._log(f"─── {os.path.basename(path)} ───")
 
