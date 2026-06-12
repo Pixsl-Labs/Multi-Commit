@@ -150,6 +150,7 @@ class ChecklistWindow(Gtk.Window):
         self.stage_list = Gtk.ListBox()
         self.stage_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self.stage_list.connect("row-selected", self._on_stage_selected)
+        self.stage_list.connect("button-press-event", self._on_stage_list_button_press)
         stage_scroll.add(self.stage_list)
         left.pack_start(stage_scroll, True, True, 0)
 
@@ -184,6 +185,7 @@ class ChecklistWindow(Gtk.Window):
         items_scroll.set_min_content_height(220)
         self.items_list = Gtk.ListBox()
         self.items_list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.items_list.connect("button-press-event", self._on_items_list_button_press)
         items_scroll.add(self.items_list)
         right.pack_start(items_scroll, True, True, 0)
 
@@ -412,6 +414,309 @@ class ChecklistWindow(Gtk.Window):
     def _update_overall_progress(self):
         done, total = checklists.progress_for_project(self.project_data)
         self.overall_progress_lbl.set_text(f"{done} / {total} complete")
+
+    # ── Right-click context menus ───────────────────────────────────────────
+
+    def _on_stage_list_button_press(self, widget, event):
+        if event.button != 3:  # right-click only
+            return False
+
+        row = self.stage_list.get_row_at_y(int(event.y))
+        if row is None or not hasattr(row, "stage_index"):
+            return False
+
+        self.stage_list.select_row(row)
+        index = row.stage_index
+
+        menu = Gtk.Menu()
+
+        def add_item(label, cb, sensitive=True):
+            mi = Gtk.MenuItem(label=label)
+            mi.set_sensitive(sensitive)
+            mi.connect("activate", cb)
+            menu.append(mi)
+
+        stages = self.project_data.get("stages", [])
+
+        add_item("➕ Add Stage", lambda _: self._add_stage(None))
+        add_item("✏ Rename Stage", lambda _: self._rename_stage(index))
+        add_item("📄 Duplicate Stage", lambda _: self._duplicate_stage(index))
+        menu.append(Gtk.SeparatorMenuItem())
+        add_item("⬆ Move Up", lambda _: self._move_stage(index, -1), sensitive=index > 0)
+        add_item("⬇ Move Down", lambda _: self._move_stage(index, 1), sensitive=index < len(stages) - 1)
+        menu.append(Gtk.SeparatorMenuItem())
+        add_item("➕ Add Item Here", lambda _: self._add_item(None))
+        add_item("☑ Mark All Done", lambda _: self._set_all_items_done(index, True))
+        add_item("☐ Mark All Undone", lambda _: self._set_all_items_done(index, False))
+        add_item("🧹 Clear Completed Items", lambda _: self._clear_completed_items(index))
+        menu.append(Gtk.SeparatorMenuItem())
+        add_item("🗑 Remove Stage", lambda _: self._remove_stage(None))
+
+        menu.show_all()
+        menu.popup_at_pointer(event)
+        return True
+
+    def _on_items_list_button_press(self, widget, event):
+        if event.button != 3:  # right-click only
+            return False
+
+        stage = self._current_stage()
+        if stage is None:
+            return False
+
+        row = self.items_list.get_row_at_y(int(event.y))
+        items = stage.get("items", [])
+
+        menu = Gtk.Menu()
+
+        def add_item(label, cb, sensitive=True):
+            mi = Gtk.MenuItem(label=label)
+            mi.set_sensitive(sensitive)
+            mi.connect("activate", cb)
+            menu.append(mi)
+
+        add_item("➕ Add Item", lambda _: self._add_item(None))
+
+        if row is not None and hasattr(row, "item_index"):
+            self.items_list.select_row(row)
+            index = row.item_index
+
+            menu.append(Gtk.SeparatorMenuItem())
+            add_item("✏ Edit Item", lambda _: self._edit_item(index))
+            add_item("☑ Toggle Done", lambda _: self._toggle_item_done(index))
+            add_item("📋 Copy Item Text", lambda _: self._copy_item_text(index))
+            add_item("📄 Duplicate Item", lambda _: self._duplicate_item(index))
+            menu.append(Gtk.SeparatorMenuItem())
+            add_item("⬆ Move Up", lambda _: self._move_item(index, -1), sensitive=index > 0)
+            add_item("⬇ Move Down", lambda _: self._move_item(index, 1), sensitive=index < len(items) - 1)
+
+            other_stages = [
+                (i, s) for i, s in enumerate(self.project_data.get("stages", []))
+                if i != self.selected_stage_index
+            ]
+            if other_stages:
+                menu.append(Gtk.SeparatorMenuItem())
+                move_menu = Gtk.Menu()
+                move_item = Gtk.MenuItem(label="➡ Move to Stage…")
+                move_item.set_submenu(move_menu)
+                for i, s in other_stages:
+                    sub = Gtk.MenuItem(label=s.get("title", "Untitled"))
+                    sub.connect("activate", lambda _, src=index, dst=i: self._move_item_to_stage(src, dst))
+                    move_menu.append(sub)
+                menu.append(move_item)
+
+            menu.append(Gtk.SeparatorMenuItem())
+            add_item("🗑 Remove Item", lambda _: self._remove_item(None))
+
+        menu.show_all()
+        menu.popup_at_pointer(event)
+        return True
+
+    # ── Stage context-menu actions ──────────────────────────────────────────
+
+    def _rename_stage(self, index):
+        stages = self.project_data.get("stages", [])
+        if not (0 <= index < len(stages)):
+            return
+        stage = stages[index]
+
+        dlg = Gtk.Dialog(title="Rename Stage", transient_for=self, flags=0)
+        dlg.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                        Gtk.STOCK_OK, Gtk.ResponseType.OK)
+        box = dlg.get_content_area()
+        box.set_border_width(12)
+        box.set_spacing(8)
+
+        lbl = Gtk.Label(label="Stage title:")
+        lbl.set_halign(Gtk.Align.START)
+        box.pack_start(lbl, False, False, 0)
+
+        entry = Gtk.Entry()
+        entry.set_text(stage.get("title", ""))
+        entry.set_activates_default(True)
+        box.pack_start(entry, False, False, 0)
+
+        dlg.set_default_response(Gtk.ResponseType.OK)
+        dlg.show_all()
+
+        if dlg.run() == Gtk.ResponseType.OK:
+            new_title = entry.get_text().strip()
+            if new_title:
+                stage["title"] = new_title
+                self._refresh_stage_list()
+                self._refresh_stage_header()
+                self._mark_dirty()
+        dlg.destroy()
+
+    def _duplicate_stage(self, index):
+        stages = self.project_data.get("stages", [])
+        if not (0 <= index < len(stages)):
+            return
+        import copy
+        clone = copy.deepcopy(stages[index])
+        clone["title"] = clone.get("title", "Untitled") + " (copy)"
+        stages.insert(index + 1, clone)
+        self.selected_stage_index = index + 1
+        self._refresh_stage_list()
+        self._mark_dirty()
+
+    def _move_stage(self, index, direction):
+        stages = self.project_data.get("stages", [])
+        new_index = index + direction
+        if not (0 <= new_index < len(stages)):
+            return
+        stages[index], stages[new_index] = stages[new_index], stages[index]
+        self.selected_stage_index = new_index
+        self._refresh_stage_list()
+        self._mark_dirty()
+
+    def _set_all_items_done(self, index, done):
+        stages = self.project_data.get("stages", [])
+        if not (0 <= index < len(stages)):
+            return
+        for item in stages[index].get("items", []):
+            item["done"] = done
+
+        if index == self.selected_stage_index:
+            self._refresh_items_list()
+            self._refresh_stage_header()
+
+        self._refresh_stage_list_progress_only()
+        self._update_overall_progress()
+        self._mark_dirty()
+
+    # ── Item context-menu actions ───────────────────────────────────────────
+
+    def _edit_item(self, index):
+        stage = self._current_stage()
+        if stage is None:
+            return
+        items = stage.get("items", [])
+        if not (0 <= index < len(items)):
+            return
+
+        dlg = Gtk.Dialog(title="Edit Item", transient_for=self, flags=0)
+        dlg.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                        Gtk.STOCK_OK, Gtk.ResponseType.OK)
+        box = dlg.get_content_area()
+        box.set_border_width(12)
+        box.set_spacing(8)
+
+        lbl = Gtk.Label(label="Item text:")
+        lbl.set_halign(Gtk.Align.START)
+        box.pack_start(lbl, False, False, 0)
+
+        entry = Gtk.Entry()
+        entry.set_text(items[index].get("text", ""))
+        entry.set_activates_default(True)
+        box.pack_start(entry, False, False, 0)
+
+        dlg.set_default_response(Gtk.ResponseType.OK)
+        dlg.show_all()
+
+        if dlg.run() == Gtk.ResponseType.OK:
+            new_text = entry.get_text().strip()
+            if new_text:
+                items[index]["text"] = new_text
+                self._refresh_items_list()
+                self._mark_dirty()
+        dlg.destroy()
+
+    def _toggle_item_done(self, index):
+        stage = self._current_stage()
+        if stage is None:
+            return
+        items = stage.get("items", [])
+        if 0 <= index < len(items):
+            items[index]["done"] = not items[index].get("done", False)
+            self._refresh_items_list()
+            self._refresh_stage_header()
+            self._refresh_stage_list_progress_only()
+            self._update_overall_progress()
+            self._mark_dirty()
+
+    def _move_item(self, index, direction):
+        stage = self._current_stage()
+        if stage is None:
+            return
+        items = stage.get("items", [])
+        new_index = index + direction
+        if not (0 <= new_index < len(items)):
+            return
+        items[index], items[new_index] = items[new_index], items[index]
+        self._refresh_items_list()
+        self._mark_dirty()
+
+    def _move_item_to_stage(self, item_index, target_stage_index):
+        stage = self._current_stage()
+        if stage is None:
+            return
+        items = stage.get("items", [])
+        if not (0 <= item_index < len(items)):
+            return
+
+        stages = self.project_data.get("stages", [])
+        if not (0 <= target_stage_index < len(stages)):
+            return
+
+        item = items.pop(item_index)
+        stages[target_stage_index].setdefault("items", []).append(item)
+
+        self._refresh_items_list()
+        self._refresh_stage_header()
+        self._refresh_stage_list_progress_only()
+        self._update_overall_progress()
+        self._mark_dirty()
+
+    def _copy_item_text(self, index):
+        stage = self._current_stage()
+        if stage is None:
+            return
+
+        items = stage.get("items", [])
+        if not (0 <= index < len(items)):
+            return
+
+        from gi.repository import Gdk
+        clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+        clipboard.set_text(items[index].get("text", ""), -1)
+
+    def _duplicate_item(self, index):
+        stage = self._current_stage()
+        if stage is None:
+            return
+
+        items = stage.get("items", [])
+        if not (0 <= index < len(items)):
+            return
+
+        import copy
+        clone = copy.deepcopy(items[index])
+        clone["text"] = clone.get("text", "") + " (copy)"
+        items.insert(index + 1, clone)
+
+        self._refresh_items_list()
+        self._refresh_stage_header()
+        self._refresh_stage_list_progress_only()
+        self._update_overall_progress()
+        self._mark_dirty()
+
+    def _clear_completed_items(self, stage_index):
+        stages = self.project_data.get("stages", [])
+        if not (0 <= stage_index < len(stages)):
+            return
+
+        stage = stages[stage_index]
+        old_items = stage.get("items", [])
+        stage["items"] = [item for item in old_items if not item.get("done")]
+
+        if stage_index == self.selected_stage_index:
+            self._refresh_items_list()
+            self._refresh_stage_header()
+
+        self._refresh_stage_list_progress_only()
+        self._update_overall_progress()
+        self._mark_dirty()
 
     # ── Notes ────────────────────────────────────────────────────────────────
 
@@ -672,11 +977,12 @@ class ChecklistWindow(Gtk.Window):
             btn.set_label("🙈 Hide Main Window")
 
     def _on_close(self, window, event):
-        """Warn before closing if there are unsaved changes (autosave off).
-        Also ensures the main window is shown again if it was hidden."""
+        """Warn before closing if there are unsaved changes.
+        Return False to allow close, True to cancel close.
+        """
         if not self._dirty:
             self._restore_main_window_if_hidden()
-            return False  # allow close
+            return False
 
         dlg = Gtk.MessageDialog(
             transient_for=self, flags=0,
@@ -685,7 +991,7 @@ class ChecklistWindow(Gtk.Window):
             text="Unsaved changes"
         )
         dlg.format_secondary_text(
-            "You have unsaved checklist changes and auto-save is off.\n"
+            "You have unsaved checklist changes.\n"
             "Save before closing?"
         )
         dlg.add_button("Discard", Gtk.ResponseType.REJECT)
@@ -698,15 +1004,14 @@ class ChecklistWindow(Gtk.Window):
 
         if response == Gtk.ResponseType.ACCEPT:
             self._save()
-            close = False
-        elif response == Gtk.ResponseType.REJECT:
-            close = False
-        else:
-            close = True
-
-        if close:
             self._restore_main_window_if_hidden()
-        return close
+            return False
+
+        if response == Gtk.ResponseType.REJECT:
+            self._restore_main_window_if_hidden()
+            return False
+
+        return True
 
     def _restore_main_window_if_hidden(self):
         if (self.parent_window is not None
