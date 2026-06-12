@@ -13,7 +13,8 @@ class ChecklistWindow(Gtk.Window):
         super().__init__(title="✅ Checklist — " + os.path.basename(project_path))
         self.parent_window = parent
         # Not transient — so this window survives hiding/minimizing the main window
-        self.set_default_size(820, 560)
+        self.set_default_size(640, 480)
+        self.set_size_request(260, 200)
         self.project_path = project_path
         self.project_data = checklists.get_project_data(project_path)
 
@@ -82,6 +83,11 @@ class ChecklistWindow(Gtk.Window):
         toolbar = Gtk.Box(spacing=8)
         toolbar.get_style_context().add_class("checklist-toolbar")
 
+        toolbar_scroll = Gtk.ScrolledWindow()
+        toolbar_scroll.set_policy(Gtk.PolicyType.EXTERNAL, Gtk.PolicyType.NEVER)
+        toolbar_scroll.set_propagate_natural_height(True)
+        toolbar_scroll.add(toolbar)
+
         import_btn = Gtk.Button(label="📋 Paste / Import Roadmap")
         import_btn.connect("clicked", self._open_import_dialog)
         toolbar.pack_start(import_btn, False, False, 0)
@@ -122,7 +128,7 @@ class ChecklistWindow(Gtk.Window):
         toolbar.pack_end(main_win_btn, False, False, 0)
         self.main_win_btn = main_win_btn
 
-        vbox.pack_start(toolbar, False, False, 0)
+        vbox.pack_start(toolbar_scroll, False, False, 0)
 
         # ── Main paned area ──
         paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
