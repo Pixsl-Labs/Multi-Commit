@@ -11,7 +11,8 @@ class ChecklistWindow(Gtk.Window):
     def __init__(self, parent, project_path):
         """Standalone checklist/roadmap window for a single project."""
         super().__init__(title="✅ Checklist — " + os.path.basename(project_path))
-        self.set_transient_for(parent)
+        self.parent_window = parent
+        # Not transient — so this window survives hiding/minimizing the main window
         self.set_default_size(820, 560)
         self.project_path = project_path
         self.project_data = checklists.get_project_data(project_path)
@@ -110,6 +111,16 @@ class ChecklistWindow(Gtk.Window):
         self.overall_progress_lbl = Gtk.Label(label="")
         self.overall_progress_lbl.get_style_context().add_class("progress-label")
         toolbar.pack_end(self.overall_progress_lbl, False, False, 8)
+
+        # ── Window-management controls ──
+        ontop_btn = Gtk.ToggleButton(label="📌 Always on Top")
+        ontop_btn.connect("toggled", self._on_ontop_toggled)
+        toolbar.pack_end(ontop_btn, False, False, 0)
+
+        main_win_btn = Gtk.ToggleButton(label="🙈 Hide Main Window")
+        main_win_btn.connect("toggled", self._on_toggle_main_window)
+        toolbar.pack_end(main_win_btn, False, False, 0)
+        self.main_win_btn = main_win_btn
 
         vbox.pack_start(toolbar, False, False, 0)
 
@@ -638,9 +649,27 @@ class ChecklistWindow(Gtk.Window):
         else:
             self._mark_dirty()  # persist the toggle state itself via dirty flag
 
+    def _on_ontop_toggled(self, btn):
+        self.set_keep_above(btn.get_active())
+
+    def _on_toggle_main_window(self, btn):
+        if self.parent_window is None:
+            btn.set_active(False)
+            return
+
+        if btn.get_active():
+            self.parent_window.hide()
+            btn.set_label("👁 Show Main Window")
+        else:
+            self.parent_window.show()
+            self.parent_window.present()
+            btn.set_label("🙈 Hide Main Window")
+
     def _on_close(self, window, event):
-        """Warn before closing if there are unsaved changes (autosave off)."""
+        """Warn before closing if there are unsaved changes (autosave off).
+        Also ensures the main window is shown again if it was hidden."""
         if not self._dirty:
+            self._restore_main_window_if_hidden()
             return False  # allow close
 
         dlg = Gtk.MessageDialog(
@@ -663,11 +692,22 @@ class ChecklistWindow(Gtk.Window):
 
         if response == Gtk.ResponseType.ACCEPT:
             self._save()
-            return False  # close
+            close = False
         elif response == Gtk.ResponseType.REJECT:
-            return False  # close without saving
+            close = False
         else:
-            return True  # cancel close
+            close = True
+
+        if close:
+            self._restore_main_window_if_hidden()
+        return close
+
+    def _restore_main_window_if_hidden(self):
+        if (self.parent_window is not None
+                and self.main_win_btn.get_active()
+                and not self.parent_window.get_visible()):
+            self.parent_window.show()
+            self.parent_window.present()
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 
