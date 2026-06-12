@@ -6,6 +6,7 @@ gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, Pango, GdkPixbuf
 from core import project_manager, settings
 from core.git_ops import is_git_repo, get_status, get_current_branch
+from ui.checklist_window import ChecklistWindow
 
 STATUS_CLEAN    = "🟢"
 STATUS_UNSTAGED = "🟡"
@@ -161,6 +162,7 @@ class ProjectListPanel(Gtk.Box):
             ("💻 VSCode",   "Open in VSCode",        lambda _, p=path: self._open_vscode(p)),
             ("🖥 Terminal", "Open terminal here",    lambda _, p=path: self._open_terminal(p)),
             ("📋 Review",   "Generate code review",  lambda _, p=path: self._code_review(p)),
+            ("✅ Checklist", "Open project checklist", lambda _, p=path: self._open_checklist(p)),
         ]:
             btn = Gtk.Button(label=label)
             btn.set_tooltip_text(tip)
@@ -222,3 +224,7 @@ class ProjectListPanel(Gtk.Box):
     def _remove(self, path):
         project_manager.remove_recent(path)
         self.refresh()
+    
+    def _open_checklist(self, path):
+        win = ChecklistWindow(self.get_toplevel(), path)
+        win.show_all()
