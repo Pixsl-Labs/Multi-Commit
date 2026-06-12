@@ -257,6 +257,10 @@ class CommitPanel(Gtk.Box):
         self.tag_panel_widget = TagPanel()
         return self.tag_panel_widget
 
+    def _build_stash_panel(self):
+        self.stash_panel_widget = StashPanel()
+        return self.stash_panel_widget
+
     def _build_notes_panel(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         box.set_border_width(8)

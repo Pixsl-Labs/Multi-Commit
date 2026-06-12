@@ -9,6 +9,7 @@ from ui.commit_panel import CommitPanel
 from ui.settings_dialog import SettingsDialog
 from ui.command_manager import CommandManagerWindow
 from ui.appearance_dialog import AppearanceDialog, apply_theme, load_theme
+from ui.checklist_window import ChecklistWindow
 from core import favourites
 
 ICON_PATH = os.path.join(os.path.dirname(__file__), "..", "assets", "icon.png")
@@ -16,6 +17,7 @@ ICON_PATH = os.path.join(os.path.dirname(__file__), "..", "assets", "icon.png")
 class MainWindow(Gtk.Window):
     def __init__(self):
         super().__init__(title="Multi-Commit")
+        self.set_wmclass("multi-commit", "Multi-Commit")
         self.set_default_size(960, 640)
         self.set_border_width(0)
         self._cmd_manager_win = None
@@ -73,6 +75,7 @@ class MainWindow(Gtk.Window):
             ("Git status",           lambda _: self._git_action("git status")),
             None,
             ("Generate Code Review", self._run_code_review),
+            ("✅ Open Checklist",     self._open_checklist),
         ]))
 
         # Spacer to push Settings + Help to the RIGHT
@@ -233,3 +236,11 @@ class MainWindow(Gtk.Window):
             pass
         dlg.run()
         dlg.destroy()
+
+    def _open_checklist(self, _=None):
+        path = self.commit_panel.project_path
+        if not path:
+            self.statusbar.push(0, "❌ No project selected for checklist")
+            return
+        win = ChecklistWindow(self, path)
+        win.show_all()
