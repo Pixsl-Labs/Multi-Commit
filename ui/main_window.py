@@ -191,12 +191,13 @@ class MainWindow(Gtk.Window):
             self.statusbar.push(0, "❌ No project selected for code review")
             return
         from core.code_review import generate
-        output_dir = os.path.expanduser("~/Projects/Code Reviews")
+        from core import settings as s
+        output_dir = os.path.expanduser(s.get("code_review_output_dir") or "~/Projects/Code Reviews")
+        os.makedirs(output_dir, exist_ok=True)
         try:
             out_path = generate(target, output_dir)
             self.statusbar.push(0, f"✅ Code review saved: {out_path}")
             # Open the file in VSCode or xdg-open
-            from core import settings as s
             try:
                 subprocess.Popen([s.get("vscode_cmd"), out_path])
             except Exception:

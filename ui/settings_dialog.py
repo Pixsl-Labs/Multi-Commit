@@ -4,12 +4,13 @@ gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk
 from core import settings
 from core.git_ops import run_custom, get_remotes
+import os
 
 class SettingsDialog(Gtk.Dialog):
     def __init__(self, parent, project_path=None):
         super().__init__(title="Settings", transient_for=parent, flags=0)
         self.add_buttons(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
-                         Gtk.STOCK_SAVE,   Gtk.ResponseType.OK)
+                        Gtk.STOCK_SAVE,   Gtk.ResponseType.OK)
         self.set_default_size(480, 360)
         self.project_path = project_path
         self.s = settings.load()
@@ -48,7 +49,27 @@ class SettingsDialog(Gtk.Dialog):
         self.add_target  = Gtk.Entry(); self.add_target.set_text(self.s["default_add_target"])
         self.vscode_cmd  = Gtk.Entry(); self.vscode_cmd.set_text(self.s["vscode_cmd"])
         self.terminal_cmd = Gtk.Entry(); self.terminal_cmd.set_text(self.s["terminal_cmd"])
+        self.code_review_dir = Gtk.Entry()
+        self.code_review_dir.set_text(self.s.get("code_review_output_dir", "~/Projects/Code Reviews"))
+
+        browse_btn = Gtk.Button(label="Browse")
+        browse_btn.connect("clicked", self._choose_code_review_dir)
+
+        code_review_box = Gtk.Box(spacing=6)
+        code_review_box.pack_start(self.code_review_dir, True, True, 0)
+        code_review_box.pack_start(browse_btn, False, False, 0)
+        self.code_review_box = code_review_box
         self.default_remote = Gtk.Entry(); self.default_remote.set_text(self.s["default_remote"])
+        self.code_review_dir = Gtk.Entry()
+        self.code_review_dir.set_text(self.s.get("code_review_output_dir", "~/Projects/Code Reviews"))
+
+        browse_btn = Gtk.Button(label="Browse")
+        browse_btn.connect("clicked", self._choose_code_review_dir)
+
+        code_review_box = Gtk.Box(spacing=6)
+        code_review_box.pack_start(self.code_review_dir, True, True, 0)
+        code_review_box.pack_start(browse_btn, False, False, 0)
+        self.code_review_box = code_review_box
 
         row(0, "Auto git add on project select", self.auto_add)
         row(1, "Auto push after commit",         self.auto_push)
@@ -56,7 +77,28 @@ class SettingsDialog(Gtk.Dialog):
         row(3, "VSCode command",                 self.vscode_cmd)
         row(4, "Terminal command",               self.terminal_cmd)
         row(5, "Default remote",                 self.default_remote)
+        row(6, "Code review output folder",       self.code_review_box)
         return grid
+    
+    def _choose_code_review_dir(self, _):
+        dlg = Gtk.FileChooserDialog(
+            title="Choose Code Review Output Folder",
+            transient_for=self,
+            action=Gtk.FileChooserAction.SELECT_FOLDER,
+            buttons=(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                    Gtk.STOCK_OPEN, Gtk.ResponseType.OK)
+        )
+
+        current = os.path.expanduser(
+            self.code_review_dir.get_text().strip() or "~/Projects/Code Reviews"
+        )
+        os.makedirs(current, exist_ok=True)
+        dlg.set_current_folder(current)
+
+        if dlg.run() == Gtk.ResponseType.OK:
+            self.code_review_dir.set_text(dlg.get_filename())
+
+        dlg.destroy()
 
     # ── Remotes tab ──
 
@@ -183,4 +225,5 @@ class SettingsDialog(Gtk.Dialog):
                 "vscode_cmd":        self.vscode_cmd.get_text(),
                 "terminal_cmd":      self.terminal_cmd.get_text(),
                 "default_remote":    self.default_remote.get_text(),
+                "code_review_output_dir": self.code_review_dir.get_text()
             })

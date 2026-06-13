@@ -10,8 +10,9 @@ DEFAULTS = {
     "auto_git_push": False,
     "default_add_target": ".",
     "vscode_cmd": "code",
-    "terminal_cmd": "kitty",   # Sam uses Kitty!
+    "terminal_cmd": "kitty",
     "default_remote": "origin",
+    "code_review_output_dir": "~/Projects/Code Reviews",
 }
 
 def _ensure_config():
