@@ -266,42 +266,40 @@ class CommandManagerWindow(Gtk.Window):
         ok, out = run_custom(cwd, fav["command"])
         self._log(f"▶ {fav['name']}\n$ {fav['command']}\n{out}\n{'✅ Done' if ok else '❌ Failed'}")
 
-    def _run_in_terminal(self, _):
-        if self.selected_index is None:
+def _run_in_terminal(self, _):
+    if self.selected_index is None:
+        return
+
+    fav = favourites.load()[self.selected_index]
+    cmd = fav["command"]
+    cwd = self.project_path or os.path.expanduser("~")
+
+    bash_cmd = (
+        f"cd {shlex.quote(cwd)}\n"
+        f"history -s {shlex.quote(cmd)}\n"
+        "echo 'Command loaded into shell history.'\n"
+        "echo 'Press ↑ then Enter to run:'\n"
+        f"echo '$ {cmd}'\n"
+        "exec bash -i"
+    )
+
+    terminal_attempts = [
+        ["kitty", "bash", "-lc", bash_cmd],
+        ["x-terminal-emulator", "--", "bash", "-lc", bash_cmd],
+        ["gnome-terminal", "--", "bash", "-lc", bash_cmd],
+        ["xterm", "-e", "bash", "-lc", bash_cmd],
+    ]
+
+    for launch_cmd in terminal_attempts:
+        try:
+            subprocess.Popen(launch_cmd, cwd=cwd)
+            self._log(f"🖥 Opened terminal with command in history: {fav['name']}")
             return
+        except FileNotFoundError:
+            continue
 
-        fav = favourites.load()[self.selected_index]
-        cmd = fav["command"]
-        cwd = self.project_path or os.path.expanduser("~")
-        term = settings.get("terminal_cmd") or "kitty"
-
-        bash_cmd = (
-            f"cd {shlex.quote(cwd)}\n"
-            f"read -e -i {shlex.quote(cmd)} -p '$ ' user_cmd\n"
-            "eval \"$user_cmd\"\n"
-            "echo\n"
-            "echo '--- Done. Press Enter to close ---'\n"
-            "read"
-        )
-
-        terminal_attempts = [
-            ["kitty", "--hold", "bash", "-lc", bash_cmd],
-            [term, "--", "bash", "-lc", bash_cmd],
-            ["x-terminal-emulator", "--", "bash", "-lc", bash_cmd],
-            ["gnome-terminal", "--", "bash", "-lc", bash_cmd],
-            ["xterm", "-e", "bash", "-lc", bash_cmd],
-        ]
-
-        for launch_cmd in terminal_attempts:
-            try:
-                subprocess.Popen(launch_cmd, cwd=cwd)
-                self._log(f"🖥 Command ready in terminal: {fav['name']}")
-                return
-            except FileNotFoundError:
-                continue
-
-        self._log("❌ No terminal found — check Settings > terminal_cmd")
-
+    self._log("❌ No terminal found — check Settings > terminal_cmd")
+    
     def _log(self, text):
         end = self.output_buf.get_end_iter()
         self.output_buf.insert(end, text + "\n")
