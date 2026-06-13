@@ -4,7 +4,7 @@ import os
 import gi
 import shlex
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gtk, Pango, Gdk
+from gi.repository import Gtk, Pango, Gdk, GLib
 from core import favourites
 from core.git_ops import run_custom
 from core import settings
@@ -39,6 +39,51 @@ class CommandManagerWindow(Gtk.Window):
             background: alpha(white, 0.03);
             border-bottom: 1px solid alpha(white, 0.08);
             padding: 8px;
+        }
+                .copy-btn {
+            background: alpha(#3498db, 0.20);
+            color: #d6ecff;
+            border: 1px solid alpha(#3498db, 0.45);
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .copy-btn-done {
+            background: #27ae60;
+            color: white;
+            border: 1px solid #2ecc71;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .run-btn {
+            background: alpha(#2ecc71, 0.18);
+            color: #dfffe9;
+            border: 1px solid alpha(#2ecc71, 0.38);
+            border-radius: 5px;
+        }
+        .terminal-btn {
+            background: alpha(#f39c12, 0.20);
+            color: #fff2d6;
+            border: 1px solid alpha(#f39c12, 0.45);
+            border-radius: 5px;
+        }
+        .edit-btn {
+            background: alpha(#9b59b6, 0.18);
+            color: #f2ddff;
+            border: 1px solid alpha(#9b59b6, 0.38);
+            border-radius: 5px;
+        }
+        .delete-btn {
+            background: alpha(#e74c3c, 0.20);
+            color: #ffe1df;
+            border: 1px solid alpha(#e74c3c, 0.45);
+            border-radius: 5px;
+        }
+        .terminal-badge {
+            background: alpha(#f39c12, 0.25);
+            color: #ffd27f;
+            border-radius: 4px;
+            padding: 0 5px;
+            font-size: 10px;
         }
         """
         provider = Gtk.CssProvider()
@@ -128,9 +173,12 @@ class CommandManagerWindow(Gtk.Window):
         self.detail_box.pack_start(cmd_scroll, False, False, 0)
 
         # Copy command button
-        copy_btn = Gtk.Button(label="📋 Copy Command to Clipboard")
-        copy_btn.connect("clicked", self._copy_command)
-        self.detail_box.pack_start(copy_btn, False, False, 0)
+        self.copy_btn = Gtk.Button(label="📋 Copy Command to Clipboard")
+        self.copy_btn.set_sensitive(False)
+        self.copy_btn.set_tooltip_text("Copy this command so you can paste it anywhere")
+        self.copy_btn.get_style_context().add_class("copy-btn")
+        self.copy_btn.connect("clicked", self._copy_command)
+        self.detail_box.pack_start(self.copy_btn, False, False, 0)
 
         self.detail_box.pack_start(Gtk.Separator(), False, False, 4)
 
@@ -138,23 +186,27 @@ class CommandManagerWindow(Gtk.Window):
         btn_box = Gtk.Box(spacing=8)
 
         self.run_btn = Gtk.Button(label="▶ Run Silently")
+        self.run_btn.get_style_context().add_class("run-btn")
         self.run_btn.set_sensitive(False)
         self.run_btn.set_tooltip_text("Run in background, output shown below")
         self.run_btn.connect("clicked", self._run_silent)
         btn_box.pack_start(self.run_btn, False, False, 0)
 
         self.run_term_btn = Gtk.Button(label="🖥 Run in Terminal")
+        self.run_term_btn.get_style_context().add_class("terminal-btn")
         self.run_term_btn.set_sensitive(False)
         self.run_term_btn.set_tooltip_text("Open Kitty terminal and run there")
         self.run_term_btn.connect("clicked", self._run_in_terminal)
         btn_box.pack_start(self.run_term_btn, False, False, 0)
 
         self.edit_btn = Gtk.Button(label="✏ Edit")
+        self.edit_btn.get_style_context().add_class("edit-btn")
         self.edit_btn.set_sensitive(False)
         self.edit_btn.connect("clicked", self._edit_selected)
         btn_box.pack_start(self.edit_btn, False, False, 0)
 
         self.del_btn = Gtk.Button(label="🗑 Delete")
+        self.del_btn.get_style_context().add_class("delete-btn")
         self.del_btn.set_sensitive(False)
         self.del_btn.connect("clicked", self._delete_selected)
         btn_box.pack_end(self.del_btn, False, False, 0)
@@ -219,6 +271,7 @@ class CommandManagerWindow(Gtk.Window):
 
             if fav.get("use_terminal"):
                 term_lbl = Gtk.Label(label="🖥")
+                term_lbl.get_style_context().add_class("terminal-badge")
                 term_lbl.set_tooltip_text("Opens in terminal")
                 top.pack_end(term_lbl, False, False, 0)
 
@@ -248,16 +301,29 @@ class CommandManagerWindow(Gtk.Window):
         self.detail_meta.set_text(
             f"📂 {fav.get('category','General')}   |   🖥 Terminal: {term_str}"
         )
-        for btn in [self.run_btn, self.run_term_btn, self.edit_btn, self.del_btn]:
+        for btn in [self.copy_btn, self.run_btn, self.run_term_btn, self.edit_btn, self.del_btn]:
             btn.set_sensitive(True)
 
     def _copy_command(self, _):
         if self.selected_index is None:
             return
+
         fav = favourites.load()[self.selected_index]
         clipboard = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
         clipboard.set_text(fav["command"], -1)
-        self._log(f"📋 Copied to clipboard: {fav['name']}")
+
+        self.copy_btn.set_label("✅ Copied to Clipboard")
+        self.copy_btn.get_style_context().remove_class("copy-btn")
+        self.copy_btn.get_style_context().add_class("copy-btn-done")
+        self._log(f"✅ Copied command to clipboard: {fav['name']}")
+
+        def reset_copy_button():
+            self.copy_btn.set_label("📋 Copy Command to Clipboard")
+            self.copy_btn.get_style_context().remove_class("copy-btn-done")
+            self.copy_btn.get_style_context().add_class("copy-btn")
+            return False
+
+        GLib.timeout_add(1300, reset_copy_button)
 
     def _on_command_right_click(self, widget, event):
         if event.button != 3:
@@ -357,7 +423,7 @@ class CommandManagerWindow(Gtk.Window):
         if dlg.run() == Gtk.ResponseType.YES:
             favourites.remove(self.selected_index)
             self.selected_index = None
-            for btn in [self.run_btn, self.run_term_btn, self.edit_btn, self.del_btn]:
+            for btn in [self.copy_btn, self.run_btn, self.run_term_btn, self.edit_btn, self.del_btn]:
                 btn.set_sensitive(False)
             self._refresh()
             self._refresh_cat_combo()

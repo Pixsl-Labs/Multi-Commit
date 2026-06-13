@@ -13,6 +13,7 @@ DEFAULTS = {
     "terminal_cmd": "kitty",
     "default_remote": "origin",
     "code_review_output_dir": "~/Projects/Code Reviews",
+    "custom_commit_templates": []
 }
 
 def _ensure_config():
