@@ -33,13 +33,13 @@ def save_all(data: dict):
 def get_project_data(project_path: str) -> dict:
     """Return the checklist data for a project, or a fresh empty structure."""
     data = load_all()
-    key = os.path.abspath(project_path)
+    key = os.path.abspath(os.path.expanduser(project_path))
     return data.get(key, {"stages": [], "created": None, "updated": None})
 
 
 def save_project_data(project_path: str, project_data: dict):
     data = load_all()
-    key = os.path.abspath(project_path)
+    key = os.path.abspath(os.path.expanduser(project_path))
 
     now = datetime.now().isoformat(timespec="seconds")
     if not project_data.get("created"):
@@ -159,3 +159,47 @@ def merge_imported_stages(project_data: dict, imported_stages: list, replace: bo
     else:
         project_data["stages"].extend(imported_stages)
     return project_data
+
+# ── Export / Delete ─────────────────────────────────────────────────────────
+
+def export_markdown(project_path: str, project_name: str = None) -> str:
+    """Build an AI-friendly markdown export of a project's checklist."""
+    project_data = get_project_data(project_path)
+    name = project_name or os.path.basename(os.path.abspath(os.path.expanduser(project_path)))
+    done, total = progress_for_project(project_data)
+
+    lines = [
+        f"# {name} — Checklist",
+        "",
+        f"**Progress:** {done} / {total} items complete",
+        "",
+    ]
+
+    for stage in project_data.get("stages", []):
+        s_done, s_total = progress_for_stage(stage)
+        lines.append(f"## {stage.get('title', 'Untitled')} ({s_done}/{s_total})")
+        lines.append("")
+
+        for item in stage.get("items", []):
+            box = "[x]" if item.get("done") else "[ ]"
+            lines.append(f"- {box} {item.get('text', '')}")
+
+        notes = stage.get("notes", "").strip()
+        if notes:
+            lines.append("")
+            lines.append("**Notes:**")
+            lines.append("")
+            lines.append(notes)
+
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def delete_project_data(project_path: str):
+    """Delete checklist data for a single project only."""
+    data = load_all()
+    key = os.path.abspath(os.path.expanduser(project_path))
+    if key in data:
+        del data[key]
+        save_all(data)

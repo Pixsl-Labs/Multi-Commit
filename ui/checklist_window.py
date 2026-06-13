@@ -15,7 +15,7 @@ class ChecklistWindow(Gtk.Window):
         # Not transient — so this window survives hiding/minimizing the main window
         self.set_default_size(640, 480)
         self.set_size_request(260, 200)
-        self.project_path = project_path
+        self.project_path = os.path.abspath(os.path.expanduser(project_path))
         self.project_data = checklists.get_project_data(project_path)
 
         # Make sure structure is sane even if file was empty/corrupt
@@ -25,7 +25,7 @@ class ChecklistWindow(Gtk.Window):
         self.selected_stage_index = None
         self._dirty = False
         self._autosave_timeout = None
-        self._autosave_enabled = bool(self.project_data.get("autosave", False))
+        self._autosave_enabled = bool(self.project_data.get("autosave", True))
 
         self._apply_css()
         self._build()
@@ -99,6 +99,14 @@ class ChecklistWindow(Gtk.Window):
         add_item_btn = Gtk.Button(label="➕ Add Item")
         add_item_btn.connect("clicked", self._add_item)
         toolbar.pack_start(add_item_btn, False, False, 0)
+
+        export_btn = Gtk.Button(label="📤 Export")
+        export_btn.connect("clicked", self._export_checklist)
+        toolbar.pack_start(export_btn, False, False, 0)
+
+        delete_all_btn = Gtk.Button(label="🗑 Delete All")
+        delete_all_btn.connect("clicked", self._delete_all_checklist)
+        toolbar.pack_start(delete_all_btn, False, False, 0)
 
         save_btn = Gtk.Button(label="💾 Save")
         save_btn.connect("clicked", lambda _: self._save())
@@ -909,6 +917,75 @@ class ChecklistWindow(Gtk.Window):
                 self._show_info("Paste box was empty — nothing imported.")
 
         dlg.destroy()
+
+    # ── Export / Delete All ──────────────────────────────────────────────────
+
+    def _export_checklist(self, _):
+        markdown_text = checklists.export_markdown(
+            self.project_path, os.path.basename(self.project_path)
+        )
+
+        dlg = Gtk.FileChooserDialog(
+            title="Export Checklist as Markdown",
+            transient_for=self,
+            action=Gtk.FileChooserAction.SAVE,
+            buttons=(Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
+                    Gtk.STOCK_SAVE, Gtk.ResponseType.OK)
+        )
+        dlg.set_do_overwrite_confirmation(True)
+        default_dir = os.path.expanduser("~/Projects/Code Reviews")
+        os.makedirs(default_dir, exist_ok=True)
+        dlg.set_current_folder(default_dir)
+        dlg.set_current_name(f"{os.path.basename(self.project_path)}_checklist.md")
+
+        if dlg.run() == Gtk.ResponseType.OK:
+            out_path = dlg.get_filename()
+            try:
+                with open(out_path, "w", encoding="utf-8") as f:
+                    f.write(markdown_text)
+                self._show_info(f"Checklist exported to:\n{out_path}")
+            except Exception as e:
+                self._show_info(f"Failed to export:\n{e}", title="Error")
+
+        dlg.destroy()
+
+    def _delete_all_checklist(self, _):
+        confirm1 = Gtk.MessageDialog(
+            transient_for=self, flags=0,
+            message_type=Gtk.MessageType.WARNING,
+            buttons=Gtk.ButtonsType.YES_NO,
+            text="Delete ALL checklist data for this project?"
+        )
+        confirm1.format_secondary_text(
+            "This will remove every stage, item and note for this project.\n"
+            "This cannot be undone."
+        )
+        r1 = confirm1.run()
+        confirm1.destroy()
+        if r1 != Gtk.ResponseType.YES:
+            return
+
+        confirm2 = Gtk.MessageDialog(
+            transient_for=self, flags=0,
+            message_type=Gtk.MessageType.WARNING,
+            buttons=Gtk.ButtonsType.YES_NO,
+            text="Are you absolutely sure?"
+        )
+        confirm2.format_secondary_text(
+            f"Last chance — delete all checklist data for:\n{self.project_path}"
+        )
+        r2 = confirm2.run()
+        confirm2.destroy()
+        if r2 != Gtk.ResponseType.YES:
+            return
+
+        checklists.delete_project_data(self.project_path)
+        self.project_data = {"stages": [], "created": None, "updated": None,
+                            "autosave": self._autosave_enabled}
+        self.selected_stage_index = None
+        self._refresh_stage_list(keep_selection=False)
+        self._dirty = False
+        self._update_save_button_style()
 
     # ── Save / autosave ──────────────────────────────────────────────────────
 
