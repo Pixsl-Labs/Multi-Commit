@@ -89,7 +89,8 @@ class ProjectListPanel(Gtk.Box):
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self.list_box = Gtk.ListBox()
-        self.list_box.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.list_box.set_selection_mode(Gtk.SelectionMode.MULTIPLE)
+        self.list_box.connect("key-press-event", self._on_key_press)
         self.list_box.connect("row-selected", self._on_row_selected)
         scroll.add(self.list_box)
         self.pack_start(scroll, True, True, 0)
@@ -228,3 +229,38 @@ class ProjectListPanel(Gtk.Box):
     def _open_checklist(self, path):
         win = ChecklistWindow(self.get_toplevel(), path)
         win.show_all()
+
+    def _on_key_press(self, widget, event):
+        from gi.repository import Gdk
+
+        ctrl = event.state & Gdk.ModifierType.CONTROL_MASK
+        shift = event.state & Gdk.ModifierType.SHIFT_MASK
+
+        if ctrl and shift and event.keyval == Gdk.KEY_Delete:
+            self._bulk_remove_selected()
+            return True
+
+        return False
+    
+    def _bulk_remove_selected(self):
+        rows = self.list_box.get_selected_rows()
+        paths = [row.path for row in rows if hasattr(row, "path")]
+
+        if not paths:
+            return
+
+        dlg = Gtk.MessageDialog(
+            transient_for=self.get_toplevel(),
+            flags=0,
+            message_type=Gtk.MessageType.WARNING,
+            buttons=Gtk.ButtonsType.YES_NO,
+            text=f"Remove {len(paths)} selected project(s)?"
+        )
+        dlg.format_secondary_text("This only removes them from Multi-Commit. It does not delete files from disk.")
+
+        if dlg.run() == Gtk.ResponseType.YES:
+            for path in paths:
+                project_manager.remove_recent(path)
+            self.refresh()
+
+        dlg.destroy()

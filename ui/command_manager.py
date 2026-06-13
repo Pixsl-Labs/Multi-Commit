@@ -2,6 +2,7 @@
 import subprocess
 import os
 import gi
+import shlex
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, Pango, Gdk
 from core import favourites
@@ -268,18 +269,37 @@ class CommandManagerWindow(Gtk.Window):
     def _run_in_terminal(self, _):
         if self.selected_index is None:
             return
+
         fav = favourites.load()[self.selected_index]
         cmd = fav["command"]
         cwd = self.project_path or os.path.expanduser("~")
-        bash_cmd = f"{cmd}; echo; echo '--- Done. Press Enter to close ---'; read"
-        term = settings.get("terminal_cmd")
-        for t in [term, "kitty", "x-terminal-emulator", "gnome-terminal", "xterm"]:
+        term = settings.get("terminal_cmd") or "kitty"
+
+        bash_cmd = (
+            f"cd {shlex.quote(cwd)}\n"
+            f"read -e -i {shlex.quote(cmd)} -p '$ ' user_cmd\n"
+            "eval \"$user_cmd\"\n"
+            "echo\n"
+            "echo '--- Done. Press Enter to close ---'\n"
+            "read"
+        )
+
+        terminal_attempts = [
+            ["kitty", "--hold", "bash", "-lc", bash_cmd],
+            [term, "--", "bash", "-lc", bash_cmd],
+            ["x-terminal-emulator", "--", "bash", "-lc", bash_cmd],
+            ["gnome-terminal", "--", "bash", "-lc", bash_cmd],
+            ["xterm", "-e", "bash", "-lc", bash_cmd],
+        ]
+
+        for launch_cmd in terminal_attempts:
             try:
-                subprocess.Popen([t, "--", "bash", "-c", bash_cmd], cwd=cwd)
-                self._log(f"🖥 Opened terminal for: {fav['name']}")
+                subprocess.Popen(launch_cmd, cwd=cwd)
+                self._log(f"🖥 Command ready in terminal: {fav['name']}")
                 return
             except FileNotFoundError:
                 continue
+
         self._log("❌ No terminal found — check Settings > terminal_cmd")
 
     def _log(self, text):
