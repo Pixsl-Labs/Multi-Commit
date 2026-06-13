@@ -87,6 +87,7 @@ class CommandManagerWindow(Gtk.Window):
         self.list_box = Gtk.ListBox()
         self.list_box.set_selection_mode(Gtk.SelectionMode.SINGLE)
         self.list_box.connect("row-selected", self._on_select)
+        self.list_box.connect("button-press-event", self._on_command_right_click)
         scroll.add(self.list_box)
         left.pack_start(scroll, True, True, 0)
         paned.pack1(left, resize=False, shrink=False)
@@ -258,6 +259,36 @@ class CommandManagerWindow(Gtk.Window):
         clipboard.set_text(fav["command"], -1)
         self._log(f"📋 Copied to clipboard: {fav['name']}")
 
+    def _on_command_right_click(self, widget, event):
+        if event.button != 3:
+            return False
+
+        row = self.list_box.get_row_at_y(int(event.y))
+        if row is None or not hasattr(row, "fav_index"):
+            return False
+
+        self.list_box.select_row(row)
+        self.selected_index = row.fav_index
+
+        menu = Gtk.Menu()
+
+        actions = [
+            ("▶ Run Silently", self._run_silent),
+            ("🖥 Run in Terminal", self._run_in_terminal),
+            ("📋 Copy Command", self._copy_command),
+            ("✏ Edit", self._edit_selected),
+            ("🗑 Delete", self._delete_selected),
+        ]
+
+        for label, callback in actions:
+            item = Gtk.MenuItem(label=label)
+            item.connect("activate", callback)
+            menu.append(item)
+
+        menu.show_all()
+        menu.popup_at_pointer(event)
+        return True
+
     def _run_silent(self, _):
         if self.selected_index is None:
             return
@@ -266,50 +297,56 @@ class CommandManagerWindow(Gtk.Window):
         ok, out = run_custom(cwd, fav["command"])
         self._log(f"▶ {fav['name']}\n$ {fav['command']}\n{out}\n{'✅ Done' if ok else '❌ Failed'}")
 
-def _run_in_terminal(self, _):
-    if self.selected_index is None:
-        return
-
-    fav = favourites.load()[self.selected_index]
-    cmd = fav["command"]
-    cwd = self.project_path or os.path.expanduser("~")
-
-    bash_cmd = (
-        f"cd {shlex.quote(cwd)}\n"
-        f"history -s {shlex.quote(cmd)}\n"
-        "echo 'Command loaded into shell history.'\n"
-        "echo 'Press ↑ then Enter to run:'\n"
-        f"echo '$ {cmd}'\n"
-        "exec bash -i"
-    )
-
-    terminal_attempts = [
-        ["kitty", "bash", "-lc", bash_cmd],
-        ["x-terminal-emulator", "--", "bash", "-lc", bash_cmd],
-        ["gnome-terminal", "--", "bash", "-lc", bash_cmd],
-        ["xterm", "-e", "bash", "-lc", bash_cmd],
-    ]
-
-    for launch_cmd in terminal_attempts:
-        try:
-            subprocess.Popen(launch_cmd, cwd=cwd)
-            self._log(f"🖥 Opened terminal with command in history: {fav['name']}")
+    def _run_in_terminal(self, _):
+        if self.selected_index is None:
             return
-        except FileNotFoundError:
-            continue
 
-    self._log("❌ No terminal found — check Settings > terminal_cmd")
-    
+        fav = favourites.load()[self.selected_index]
+        cmd = fav["command"]
+        cwd = self.project_path or os.path.expanduser("~")
+
+        bash_cmd = (
+            f"cd {shlex.quote(cwd)}\n"
+            f"echo {shlex.quote('Command ready. Press Enter to run:')}\n"
+            f"read -e -i {shlex.quote(cmd)} -p '$ ' user_cmd\n"
+            "eval \"$user_cmd\"\n"
+            "echo\n"
+            "echo '--- Done. Press Enter to close ---'\n"
+            "read"
+        )
+
+        terminal_attempts = [
+            ["kitty", "--hold", "bash", "-lc", bash_cmd],
+            ["x-terminal-emulator", "--", "bash", "-lc", bash_cmd],
+            ["gnome-terminal", "--", "bash", "-lc", bash_cmd],
+            ["xterm", "-e", "bash", "-lc", bash_cmd],
+        ]
+
+        for launch_cmd in terminal_attempts:
+            try:
+                subprocess.Popen(launch_cmd, cwd=cwd)
+                self._log(f"🖥 Command ready in terminal: {fav['name']}")
+                return
+            except FileNotFoundError:
+                continue
+
+        self._log("❌ No terminal found — check Settings > terminal_cmd")
+
     def _log(self, text):
         end = self.output_buf.get_end_iter()
         self.output_buf.insert(end, text + "\n")
         self.output_view.scroll_to_iter(self.output_buf.get_end_iter(), 0, False, 0, 0)
 
     def _edit_selected(self, _):
+        if self.selected_index is None:
+            return
         fav = favourites.load()[self.selected_index]
         self._open_edit_dialog(fav, self.selected_index)
 
     def _delete_selected(self, _):
+        if self.selected_index is None:
+            return
+
         fav = favourites.load()[self.selected_index]
         dlg = Gtk.MessageDialog(
             transient_for=self, flags=0,
