@@ -161,7 +161,6 @@ class ChecklistWindow(Gtk.Window):
         self.stage_list.connect("row-selected", self._on_stage_selected)
         self.stage_list.connect("button-press-event", self._on_stage_list_button_press)
         self.stage_list.connect("button-press-event", self._on_stage_click_clear_selection)
-        self.items_list.connect("button-press-event", self._on_item_click_clear_selection)
         stage_scroll.add(self.stage_list)
         left.pack_start(stage_scroll, True, True, 0)
 
@@ -198,6 +197,7 @@ class ChecklistWindow(Gtk.Window):
         self.items_list.set_selection_mode(Gtk.SelectionMode.MULTIPLE)
         self.items_list.connect("key-press-event", self._on_key_press)
         self.items_list.connect("button-press-event", self._on_items_list_button_press)
+        self.items_list.connect("button-press-event", self._on_item_click_clear_selection)
         items_scroll.add(self.items_list)
         right.pack_start(items_scroll, True, True, 0)
 
@@ -1113,42 +1113,43 @@ class ChecklistWindow(Gtk.Window):
             return True
 
         return False
-    
-def _bulk_remove_selected_items(self):
-    stage = self._current_stage()
-    if stage is None:
-        return
 
-    rows = self.items_list.get_selected_rows()
-    indexes = sorted(
-        [row.item_index for row in rows if hasattr(row, "item_index")],
-        reverse=True
-    )
+    def _bulk_remove_selected_items(self):
+        stage = self._current_stage()
+        if stage is None:
+            return
 
-    if not indexes:
-        return
+        rows = self.items_list.get_selected_rows()
+        indexes = sorted(
+            [row.item_index for row in rows if hasattr(row, "item_index")],
+            reverse=True
+        )
 
-    dlg = Gtk.MessageDialog(
-        transient_for=self,
-        flags=0,
-        message_type=Gtk.MessageType.WARNING,
-        buttons=Gtk.ButtonsType.YES_NO,
-        text=f"Delete {len(indexes)} selected checklist item(s)?"
-    )
+        if not indexes:
+            return
 
-    if dlg.run() == Gtk.ResponseType.YES:
-        items = stage.get("items", [])
-        for index in indexes:
-            if 0 <= index < len(items):
-                items.pop(index)
+        dlg = Gtk.MessageDialog(
+            transient_for=self,
+            flags=0,
+            message_type=Gtk.MessageType.WARNING,
+            buttons=Gtk.ButtonsType.YES_NO,
+            text=f"Delete {len(indexes)} selected checklist item(s)?"
+        )
 
-        self._refresh_items_list()
-        self._refresh_stage_header()
-        self._refresh_stage_list_progress_only()
-        self._update_overall_progress()
-        self._mark_dirty()
+        response = dlg.run()
+        dlg.destroy()
 
-    dlg.destroy()
+        if response == Gtk.ResponseType.YES:
+            items = stage.get("items", [])
+            for index in indexes:
+                if 0 <= index < len(items):
+                    items.pop(index)
+
+            self._refresh_items_list()
+            self._refresh_stage_header()
+            self._refresh_stage_list_progress_only()
+            self._update_overall_progress()
+            self._mark_dirty()
 
     def _bulk_remove_selected_stages(self):
         rows = self.stage_list.get_selected_rows()
@@ -1169,7 +1170,10 @@ def _bulk_remove_selected_items(self):
         )
         dlg.format_secondary_text("This also deletes all checklist items inside those stages.")
 
-        if dlg.run() == Gtk.ResponseType.YES:
+        response = dlg.run()
+        dlg.destroy()
+
+        if response == Gtk.ResponseType.YES:
             stages = self.project_data.get("stages", [])
             for index in indexes:
                 if 0 <= index < len(stages):
@@ -1179,21 +1183,6 @@ def _bulk_remove_selected_items(self):
             self._refresh_stage_list(keep_selection=False)
             self._mark_dirty()
 
-        dlg.destroy()
-
-    # ── Helpers ──────────────────────────────────────────────────────────────
-
-    def _show_info(self, message, title="Info"):
-        dlg = Gtk.MessageDialog(
-            transient_for=self, flags=0,
-            message_type=Gtk.MessageType.INFO,
-            buttons=Gtk.ButtonsType.OK,
-            text=title
-        )
-        dlg.format_secondary_text(message)
-        dlg.run()
-        dlg.destroy()
-
     def _on_stage_click_clear_selection(self, widget, event):
         ctrl = event.state & Gdk.ModifierType.CONTROL_MASK
 
@@ -1201,7 +1190,6 @@ def _bulk_remove_selected_items(self):
             self.stage_list.unselect_all()
 
         return False
-
 
     def _on_item_click_clear_selection(self, widget, event):
         ctrl = event.state & Gdk.ModifierType.CONTROL_MASK
