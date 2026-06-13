@@ -92,6 +92,7 @@ class ProjectListPanel(Gtk.Box):
         self.list_box.set_selection_mode(Gtk.SelectionMode.MULTIPLE)
         self.list_box.connect("key-press-event", self._on_key_press)
         self.list_box.connect("row-selected", self._on_row_selected)
+        self.list_box.connect("button-press-event", self._on_button_press)
         scroll.add(self.list_box)
         self.pack_start(scroll, True, True, 0)
 
@@ -264,3 +265,13 @@ class ProjectListPanel(Gtk.Box):
             self.refresh()
 
         dlg.destroy()
+
+    def _on_button_press(self, widget, event):
+        from gi.repository import Gdk
+
+        ctrl = event.state & Gdk.ModifierType.CONTROL_MASK
+
+        if event.button == 1 and not ctrl:
+            self.list_box.unselect_all()
+
+        return False

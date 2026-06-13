@@ -160,6 +160,8 @@ class ChecklistWindow(Gtk.Window):
         self.stage_list.connect("key-press-event", self._on_key_press)
         self.stage_list.connect("row-selected", self._on_stage_selected)
         self.stage_list.connect("button-press-event", self._on_stage_list_button_press)
+        self.stage_list.connect("button-press-event", self._on_stage_click_clear_selection)
+        self.items_list.connect("button-press-event", self._on_item_click_clear_selection)
         stage_scroll.add(self.stage_list)
         left.pack_start(stage_scroll, True, True, 0)
 
@@ -1191,3 +1193,20 @@ def _bulk_remove_selected_items(self):
         dlg.format_secondary_text(message)
         dlg.run()
         dlg.destroy()
+
+    def _on_stage_click_clear_selection(self, widget, event):
+        ctrl = event.state & Gdk.ModifierType.CONTROL_MASK
+
+        if event.button == 1 and not ctrl:
+            self.stage_list.unselect_all()
+
+        return False
+
+
+    def _on_item_click_clear_selection(self, widget, event):
+        ctrl = event.state & Gdk.ModifierType.CONTROL_MASK
+
+        if event.button == 1 and not ctrl:
+            self.items_list.unselect_all()
+
+        return False
